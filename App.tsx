@@ -2,7 +2,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { NodeComponent } from './components/NodeComponent';
 import { NodeType, NodeData, Connection, NodeStatus, Workspace } from './types';
-import { Plus, Play, Trash2, Save, Upload, Zap, Settings, Layout, Layers, Image as ImageIcon, ChevronRight, X, ChevronDown, Check, Lightbulb, Copy, Edit2, Edit3, Type, FileText, Code, Eye } from 'lucide-react';
+import { Plus, Play, Trash2, Save, Upload, Zap, Settings, Layout, Layers, Image as ImageIcon, ChevronRight, X, ChevronDown, Check, Lightbulb, Copy, Edit2, Edit3, Type, FileText, Code, Eye, RefreshCw } from 'lucide-react';
 import { generateText } from './services/geminiService';
 
 // --- Initial Data ---
@@ -77,8 +77,28 @@ interface ContextMenuState {
 
 export default function App() {
   // --- State ---
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([DEFAULT_WORKSPACE]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(DEFAULT_WORKSPACE.id);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
+    // Persistence: Initialize from LocalStorage if available
+    const saved = localStorage.getItem('textflow_workspaces');
+    if (saved) {
+      try {
+        const parsed: Workspace[] = JSON.parse(saved);
+        // Safety: Reset any 'RUNNING' status to 'IDLE' because background processes die on refresh
+        return parsed.map(ws => ({
+          ...ws,
+          nodes: ws.nodes.map(n => n.status === NodeStatus.RUNNING ? { ...n, status: NodeStatus.IDLE } : n)
+        }));
+      } catch (e) {
+        console.error("Failed to parse workspaces from storage", e);
+      }
+    }
+    return [DEFAULT_WORKSPACE];
+  });
+
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(() => {
+    // Persistence: Load active ID
+    return localStorage.getItem('textflow_active_id') || DEFAULT_WORKSPACE.id;
+  });
   
   // Derived state for easier access
   const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
@@ -86,6 +106,12 @@ export default function App() {
   const connections = activeWorkspace.connections;
   const scale = activeWorkspace.scale;
   const pan = activeWorkspace.pan;
+
+  // Persistence: Save on Change
+  useEffect(() => {
+    localStorage.setItem('textflow_workspaces', JSON.stringify(workspaces));
+    localStorage.setItem('textflow_active_id', activeWorkspaceId);
+  }, [workspaces, activeWorkspaceId]);
 
   // Interaction State
   const [isDragging, setIsDragging] = useState(false);
@@ -152,26 +178,17 @@ export default function App() {
   // --- Canvas Interaction Handlers ---
 
   const handleWheel = (e: React.WheelEvent) => {
-    // Implement Zoom-to-Cursor logic
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return;
 
     const zoomSensitivity = 0.001;
-    const delta = e.deltaY; // vertical scroll amount
-
-    // Calculate new scale
+    const delta = e.deltaY;
     const newScale = Math.min(Math.max(0.1, scale - delta * zoomSensitivity), 3);
 
-    // Calculate mouse position relative to canvas container
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-
-    // Calculate mouse position in "World Space" (relative to content) before zoom
     const worldX = (mouseX - pan.x) / scale;
     const worldY = (mouseY - pan.y) / scale;
-
-    // Calculate new pan so that the World Space point remains under the mouse
-    // mouseX = newPanX + worldX * newScale
     const newPanX = mouseX - worldX * newScale;
     const newPanY = mouseY - worldY * newScale;
 
@@ -183,9 +200,7 @@ export default function App() {
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 2) return; // Ignore right click for dragging
-    // We allow dragging if the user clicks anywhere on the canvas container or background.
-    // Nodes stop propagation, so if we reach here, we are on the background.
+    if (e.button === 2) return;
     setIsDragging(true);
     setDragStart({ x: e.clientX, y: e.clientY });
     setSelectedNodeId(null);
@@ -245,7 +260,7 @@ export default function App() {
 
   const handleNodeMouseDown = useCallback((e: React.MouseEvent, id: string) => {
       e.stopPropagation();
-      if (e.button === 2) return; // Ignore right click start drag
+      if (e.button === 2) return; 
       setSelectedNodeId(id);
       setSelectedConnectionId(null);
       setDraggedNodeId(id);
@@ -262,7 +277,7 @@ export default function App() {
           type: 'NODE',
           targetId: id
       });
-      setSelectedNodeId(id); // Select it when right clicked too
+      setSelectedNodeId(id); 
   }, []);
 
   const updateNodeContent = useCallback((id: string, text: string) => {
@@ -327,11 +342,9 @@ export default function App() {
       let y = 100;
 
       if (position) {
-          // Convert screen coordinates (from context menu) to canvas coordinates
           x = (position.x - pan.x) / scale;
           y = (position.y - pan.y) / scale;
       } else {
-          // Center of screen if added from sidebar
           const rect = canvasRef.current?.getBoundingClientRect();
           x = rect ? (-pan.x + rect.width / 2) / scale : 100;
           y = rect ? (-pan.y + rect.height / 2) / scale : 100;
@@ -378,7 +391,6 @@ export default function App() {
 
   // --- Connection Handlers ---
 
-  // Optimized: Receives x,y directly to avoid dependency on `nodes` state during render loop
   const handleConnectStart = useCallback((nodeId: string, x: number, y: number, isInput: boolean) => {
       if (!isInput) {
           setConnectionStart({
@@ -410,18 +422,34 @@ export default function App() {
       setConnectionStart(null);
   }, [connectionStart, connections, activeWorkspaceId]);
 
-  // --- Execution Engine ---
+  // --- Execution Engine Refactored ---
 
-  const executeWorkflow = async () => {
+  // Helper: Find all nodes that depend on a specific node (recursively)
+  const getDescendantNodeIds = (startNodeId: string): Set<string> => {
+    const descendants = new Set<string>();
+    const stack = [startNodeId];
+    
+    while(stack.length > 0) {
+        const current = stack.pop()!;
+        // Find connections where current node is the source
+        const outgoing = connections.filter(c => c.sourceId === current);
+        for(const conn of outgoing) {
+            if(!descendants.has(conn.targetId)) {
+                descendants.add(conn.targetId);
+                stack.push(conn.targetId);
+            }
+        }
+    }
+    return descendants;
+  };
+
+  // Core Execution Loop: Runs any node that is IDLE and has satisfied inputs
+  const processWorkflowQueue = async (initialNodesState: NodeData[]) => {
       setIsExecuting(true);
       
-      updateActiveWorkspace({
-          nodes: nodes.map(n => ({ ...n, status: NodeStatus.IDLE, errorMessage: undefined }))
-      });
+      // We keep a local reference to nodes to track state within this async execution scope
+      let currentNodes = [...initialNodesState];
 
-      // Fixed: Explicitly type currentNodes to avoid TS inferring errorMessage as 'undefined' literal
-      let currentNodes: NodeData[] = activeWorkspace.nodes.map(n => ({ ...n, status: NodeStatus.IDLE, errorMessage: undefined }));
-      
       const updateLocalAndState = (id: string, updates: Partial<NodeData>) => {
           currentNodes = currentNodes.map(n => n.id === id ? { ...n, ...updates } : n);
           setWorkspaces(prev => prev.map(w => {
@@ -433,8 +461,8 @@ export default function App() {
       };
 
       try {
-        // Step 1: Process "Instant" Nodes (Input, Image)
-        const instantNodes = currentNodes.filter(n => n.type === NodeType.INPUT || n.type === NodeType.IMAGE_NODE);
+        // Step 1: Mark "Instant" nodes as complete if they aren't already
+        const instantNodes = currentNodes.filter(n => (n.type === NodeType.INPUT || n.type === NodeType.IMAGE_NODE) && n.status === NodeStatus.IDLE);
         for (const node of instantNodes) {
              const content = node.type === NodeType.INPUT ? (node.userPrompt || '') : (node.imageUrls?.join('\n') || '');
              updateLocalAndState(node.id, { status: NodeStatus.COMPLETED, content });
@@ -444,16 +472,12 @@ export default function App() {
         while (hasProcessed) {
             hasProcessed = false;
             
-            // Find nodes that are IDLE and ready to run
             const nodesToRun = currentNodes.filter(node => {
                 if (node.status !== NodeStatus.IDLE) return false;
                 
-                // Special case: AI_BRAINSTORM has no inputs, it runs on Global Context
                 if (node.type === NodeType.AI_BRAINSTORM) return true;
 
                 const incomingEdges = connections.filter(c => c.targetId === node.id);
-                
-                // If no inputs and it's not a source node type, don't run
                 if (incomingEdges.length === 0 && node.type !== NodeType.INPUT && node.type !== NodeType.IMAGE_NODE) return false;
 
                 const allSourcesReady = incomingEdges.every(edge => {
@@ -465,10 +489,9 @@ export default function App() {
 
             for (const node of nodesToRun) {
                 hasProcessed = true;
-                updateLocalAndState(node.id, { status: NodeStatus.RUNNING });
+                updateLocalAndState(node.id, { status: NodeStatus.RUNNING, errorMessage: undefined });
 
                 const incomingEdges = connections.filter(c => c.targetId === node.id);
-                
                 let textInputs: string[] = [];
                 let imageInputs: string[] = [];
 
@@ -476,9 +499,7 @@ export default function App() {
                     const source = currentNodes.find(n => n.id === edge.sourceId);
                     if (source) {
                         if (source.type === NodeType.IMAGE_NODE) {
-                            if (source.imageUrls) {
-                                imageInputs.push(...source.imageUrls);
-                            }
+                            if (source.imageUrls) imageInputs.push(...source.imageUrls);
                         } else {
                             textInputs.push(source.content);
                         }
@@ -494,7 +515,6 @@ export default function App() {
                     try {
                         let prompt = inputTextCombined;
                         
-                        // Special Handling for AI Nodes
                         if (node.type === NodeType.AI_BRAINSTORM) {
                             prompt = "Generate a list of relevant topics based on the global context provided.";
                         } else if (node.type === NodeType.AI_CODER && node.customTemplate) {
@@ -535,6 +555,40 @@ ${imageInputs.length > 0 ? `Also, insert these images where appropriate in the H
       }
   };
 
+  // Run Button Logic: Resets ALL nodes to IDLE and starts
+  const executeWorkflow = async () => {
+      // Explicitly type to avoid TS errors
+      const resetNodes: NodeData[] = activeWorkspace.nodes.map(n => ({ 
+          ...n, 
+          status: NodeStatus.IDLE, 
+          errorMessage: undefined 
+      }));
+      
+      updateActiveWorkspace({ nodes: resetNodes });
+      // Short delay to allow state update to propagate visually before logic starts
+      await new Promise(r => setTimeout(r, 50));
+      processWorkflowQueue(resetNodes);
+  };
+
+  // Retry Button Logic: Resets ONLY target node and its descendants, then starts
+  const handleRetryNode = async (nodeId: string) => {
+      if (isExecuting) return;
+
+      const descendants = getDescendantNodeIds(nodeId);
+      const nodesToReset = new Set([nodeId, ...descendants]);
+
+      const updatedNodes: NodeData[] = activeWorkspace.nodes.map(n => {
+          if (nodesToReset.has(n.id)) {
+              return { ...n, status: NodeStatus.IDLE, errorMessage: undefined };
+          }
+          return n;
+      });
+
+      updateActiveWorkspace({ nodes: updatedNodes });
+      await new Promise(r => setTimeout(r, 50));
+      processWorkflowQueue(updatedNodes);
+  };
+
   // --- Rendering Helpers ---
 
   const renderConnections = () => {
@@ -562,10 +616,7 @@ ${imageInputs.length > 0 ? `Also, insert these images where appropriate in the H
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); deleteConnection(conn.id); }}
               className="cursor-pointer group pointer-events-auto"
             >
-                {/* Thick invisible path for easier clicking */}
                 <path d={pathData} stroke="transparent" strokeWidth="20" fill="none" />
-                
-                {/* Visible path */}
                 <path 
                   d={pathData} 
                   stroke={isSelected ? "#3b82f6" : "#4a5568"} 
@@ -573,8 +624,6 @@ ${imageInputs.length > 0 ? `Also, insert these images where appropriate in the H
                   fill="none" 
                   className={`transition-colors ${isSelected ? '' : 'group-hover:stroke-gray-500'}`}
                 />
-                
-                 {/* Animation for flow */}
                  <path d={pathData} stroke={isSelected ? "#60a5fa" : "#a0aec0"} strokeWidth="2" fill="none" className={isExecuting ? "animate-pulse" : ""} strokeDasharray={isSelected ? "5,5" : ""} />
             </g>
         );
@@ -703,7 +752,6 @@ ${imageInputs.length > 0 ? `Also, insert these images where appropriate in the H
                     willChange: 'transform'
                 }}
             >
-                {/* Updated SVG Layer: Full size but pass-through events to container */}
                 <svg className="absolute top-0 left-0 w-full h-full overflow-visible pointer-events-none" style={{ zIndex: 0 }}>
                     {renderConnections()}
                     {connectionStart && (
@@ -727,6 +775,7 @@ ${imageInputs.length > 0 ? `Also, insert these images where appropriate in the H
                             onConnectEnd={handleConnectEnd}
                             onUpdateContent={updateNodeContent}
                             onDelete={deleteNode}
+                            onRetry={handleRetryNode}
                             isSelected={selectedNodeId === node.id}
                         />
                     ))}
@@ -770,6 +819,12 @@ ${imageInputs.length > 0 ? `Also, insert these images where appropriate in the H
                             className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2"
                         >
                             <Copy size={14}/> Duplicate
+                        </button>
+                         <button 
+                            onClick={() => handleRetryNode(contextMenu.targetId!)} 
+                            className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2"
+                        >
+                            <RefreshCw size={14}/> Retry / Run From Here
                         </button>
                         <div className="h-px bg-gray-700 my-1"></div>
                         <button 
@@ -854,7 +909,7 @@ ${imageInputs.length > 0 ? `Also, insert these images where appropriate in the H
                                 </label>
                                 <textarea 
                                     value={selectedNode.imageUrls?.join('\n') || ''}
-                                    onChange={(e) => updateNodeData(selectedNode.id, { imageUrls: e.target.value.split('\n').filter(line => line.trim() !== '' || line === '\n') })} // Allow typing newlines but filter execution logic
+                                    onChange={(e) => updateNodeData(selectedNode.id, { imageUrls: e.target.value.split('\n').filter(line => line.trim() !== '' || line === '\n') })}
                                     className="w-full h-32 bg-gray-800 border border-gray-700 rounded p-2 text-sm focus:border-blue-500 outline-none whitespace-pre"
                                     placeholder="https://example.com/image1.jpg&#10;https://example.com/image2.jpg"
                                 />

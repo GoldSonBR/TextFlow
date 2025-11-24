@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, memo } from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
-import { Play, FileText, CheckCircle, AlertCircle, Code, Eye, Edit3, Type, Image as ImageIcon, Lightbulb } from 'lucide-react';
+import { Play, FileText, CheckCircle, AlertCircle, Code, Eye, Edit3, Type, Image as ImageIcon, Lightbulb, RefreshCw } from 'lucide-react';
 
 interface NodeComponentProps {
   node: NodeData;
@@ -11,6 +11,7 @@ interface NodeComponentProps {
   onConnectEnd: (id: string, isInput: boolean) => void;
   onUpdateContent: (id: string, newContent: string) => void;
   onDelete: (id: string) => void;
+  onRetry: (id: string) => void;
   isSelected: boolean;
 }
 
@@ -23,6 +24,7 @@ export const NodeComponent = memo(({
   onConnectEnd,
   onUpdateContent,
   onDelete,
+  onRetry,
   isSelected,
 }: NodeComponentProps) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -95,9 +97,22 @@ export const NodeComponent = memo(({
            {node.status === NodeStatus.RUNNING && <span className="animate-pulse text-yellow-400 text-xs">● Processing</span>}
            {node.status === NodeStatus.COMPLETED && <span className="text-green-400 text-xs">● Done</span>}
            {node.status === NodeStatus.ERROR && <span className="text-red-400 text-xs">Error</span>}
+           
+           {/* Retry Button - Show if Error or Completed (to re-run) */}
+           {(node.status === NodeStatus.ERROR || node.status === NodeStatus.COMPLETED) && (
+             <button
+               onClick={(e) => { e.stopPropagation(); onRetry(node.id); }}
+               className="text-gray-400 hover:text-blue-400 p-0.5 rounded transition-colors"
+               title="Retry / Regenerate"
+             >
+               <RefreshCw size={14} />
+             </button>
+           )}
+
           <button 
             onClick={(e) => { e.stopPropagation(); onDelete(node.id); }}
-            className="text-gray-500 hover:text-red-400"
+            className="text-gray-500 hover:text-red-400 ml-1"
+            title="Delete Node"
           >
             ×
           </button>
@@ -145,11 +160,11 @@ export const NodeComponent = memo(({
 
         {/* Output Display */}
         {node.type !== NodeType.INPUT && node.type !== NodeType.IMAGE_NODE && (
-          <div className="flex-1">
+          <div className="flex-1 flex flex-col">
             <label className="text-xs text-gray-400 uppercase font-bold mb-1 block">Output</label>
             {node.type === NodeType.OUTPUT_PREVIEW ? (
               <div 
-                className="w-full bg-white text-black text-sm p-2 rounded h-64 overflow-auto"
+                className="w-full bg-white text-black text-sm p-2 rounded min-h-[16rem] h-64 overflow-auto resize-y"
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 <div dangerouslySetInnerHTML={{ __html: node.content }} />
@@ -157,7 +172,7 @@ export const NodeComponent = memo(({
               </div>
             ) : (
               <div 
-                className="w-full bg-gray-950 text-gray-300 text-xs p-2 rounded border border-gray-700 h-32 overflow-y-auto whitespace-pre-wrap font-mono"
+                className="w-full bg-gray-950 text-gray-300 text-xs p-2 rounded border border-gray-700 min-h-[8rem] h-32 overflow-y-auto whitespace-pre-wrap font-mono resize-y"
                 onMouseDown={(e) => e.stopPropagation()}
               >
                 {node.content || <span className="text-gray-600 italic">Waiting for execution...</span>}
