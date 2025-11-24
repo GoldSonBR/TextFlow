@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 
 // We use the Gemini API to simulate different "agents" (GPT, Copilot, etc.)
@@ -10,6 +9,8 @@ export const generateText = async (
   systemInstruction?: string,
   globalContext?: string
 ): Promise<string> => {
+  // Use process.env.API_KEY exclusively as per guidelines.
+  // Assume it is valid and configured.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   // Combine Global Context (Workspace description) with Node specific instructions
@@ -35,4 +36,3 @@ ${systemInstruction || 'You are a helpful AI assistant.'}
     throw error;
   }
 };
-    
