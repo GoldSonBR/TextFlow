@@ -2,7 +2,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { NodeComponent } from './components/NodeComponent';
 import { NodeType, NodeData, Connection, NodeStatus, Workspace } from './types';
-import { Plus, Play, Trash2, Save, Upload, Zap, Settings, Layout, Layers, Image as ImageIcon, ChevronRight, X, ChevronDown, Check, Lightbulb, Copy, Edit2, Edit3, Type, FileText, Code, Eye, RefreshCw } from 'lucide-react';
+import { Plus, Play, Trash2, Save, Upload, Zap, Settings, Layout, Layers, Image as ImageIcon, ChevronRight, X, ChevronDown, Check, Lightbulb, Copy, Edit2, Edit3, Type, FileText, Code, Eye, RefreshCw, Wand } from 'lucide-react';
 import { generateText } from './services/geminiService';
 
 // --- Initial Data ---
@@ -39,6 +39,7 @@ const INITIAL_NODES: NodeData[] = [
     systemInstruction: 'You are a frontend web developer. Take the provided blog content and wrap it in the provided HTML template. If no template is provided, create a modern one. If image URLs are provided in the input, use them in <img> tags.',
     model: 'gemini-2.5-flash',
     status: NodeStatus.IDLE,
+    cleanOutput: true,
   },
   {
     id: 'node-6',
@@ -380,7 +381,8 @@ export default function App() {
           model,
           status: NodeStatus.IDLE,
           imageUrls: type === NodeType.IMAGE_NODE ? [] : undefined,
-          customTemplate: type === NodeType.AI_CODER ? '' : undefined
+          customTemplate: type === NodeType.AI_CODER ? '' : undefined,
+          cleanOutput: false
       };
       
       updateActiveWorkspace({ nodes: [...nodes, newNode] });
@@ -514,7 +516,13 @@ export default function App() {
                 } else {
                     try {
                         let prompt = inputTextCombined;
+                        let finalSystemInstruction = node.systemInstruction || '';
                         
+                        // Strict Output Logic: Inject tag instructions
+                        if (node.cleanOutput) {
+                            finalSystemInstruction += `\n\nIMPORTANT: You must STRICTLY wrap your final output content in <OUTPUT> and </OUTPUT> tags. Do not output any conversational filler text (like "Here is the code") outside these tags.`;
+                        }
+
                         if (node.type === NodeType.AI_BRAINSTORM) {
                             prompt = "Generate a list of relevant topics based on the global context provided.";
                         } else if (node.type === NodeType.AI_CODER && node.customTemplate) {
@@ -536,10 +544,23 @@ ${imageInputs.length > 0 ? `Also, insert these images where appropriate in the H
                         const result = await generateText(
                             node.model || 'gemini-2.5-flash', 
                             prompt, 
-                            node.systemInstruction,
+                            finalSystemInstruction,
                             activeWorkspace.globalContext
                         );
-                        updateLocalAndState(node.id, { status: NodeStatus.COMPLETED, content: result });
+
+                        // Strict Output Logic: Extract content from tags
+                        let finalContent = result;
+                        if (node.cleanOutput) {
+                            const match = result.match(/<OUTPUT>([\s\S]*?)<\/OUTPUT>/);
+                            if (match && match[1]) {
+                                finalContent = match[1].trim();
+                            } else {
+                                // If tags are missing, we keep the original result but log a warning or maybe strip common prefixes if we wanted to be more aggressive.
+                                // For now, we assume the model followed instructions or failed gracefully.
+                            }
+                        }
+
+                        updateLocalAndState(node.id, { status: NodeStatus.COMPLETED, content: finalContent });
                     } catch (e: any) {
                         updateLocalAndState(node.id, { status: NodeStatus.ERROR, errorMessage: e.message || "Unknown error" });
                     }
@@ -860,31 +881,47 @@ ${imageInputs.length > 0 ? `Also, insert these images where appropriate in the H
                         </div>
 
                         {(selectedNode.type === NodeType.AI_GENERATOR || selectedNode.type === NodeType.AI_OPTIMIZER || selectedNode.type === NodeType.AI_FACT_CHECK || selectedNode.type === NodeType.AI_CODER || selectedNode.type === NodeType.AI_BRAINSTORM) && (
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold text-gray-500 uppercase">AI Model</label>
-                                <select 
-                                    value={selectedNode.model} 
-                                    onChange={(e) => updateNodeData(selectedNode.id, { model: e.target.value })}
-                                    className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-sm focus:border-blue-500 outline-none"
-                                >
-                                    <option value="gemini-2.5-flash">Gemini Flash (Fast)</option>
-                                    <option value="gemini-3-pro-preview">Gemini Pro (Smart)</option>
-                                    <option value="gemini-2.5-flash-lite-latest">Gemini Lite (Cheaper)</option>
-                                </select>
-                            </div>
-                        )}
+                            <>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-gray-500 uppercase">AI Model</label>
+                                    <select 
+                                        value={selectedNode.model} 
+                                        onChange={(e) => updateNodeData(selectedNode.id, { model: e.target.value })}
+                                        className="w-full bg-gray-800 border border-gray-700 rounded p-2 text-sm focus:border-blue-500 outline-none"
+                                    >
+                                        <option value="gemini-2.5-flash">Gemini Flash (Fast)</option>
+                                        <option value="gemini-3-pro-preview">Gemini Pro (Smart)</option>
+                                        <option value="gemini-2.5-flash-lite-latest">Gemini Lite (Cheaper)</option>
+                                    </select>
+                                </div>
+                                
+                                {/* Strict Output Toggle */}
+                                <div className="flex items-center justify-between p-2 bg-gray-800 rounded border border-gray-700">
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-medium text-gray-200 flex items-center gap-2">
+                                            <Wand size={14} className="text-purple-400" /> Strict Output Mode
+                                        </span>
+                                        <span className="text-[10px] text-gray-500">Removes "Here is the..." filler text.</span>
+                                    </div>
+                                    <button 
+                                        onClick={() => updateNodeData(selectedNode.id, { cleanOutput: !selectedNode.cleanOutput })}
+                                        className={`w-10 h-5 rounded-full relative transition-colors ${selectedNode.cleanOutput ? 'bg-purple-600' : 'bg-gray-600'}`}
+                                    >
+                                        <div className={`absolute top-1 w-3 h-3 rounded-full bg-white transition-all ${selectedNode.cleanOutput ? 'left-6' : 'left-1'}`}></div>
+                                    </button>
+                                </div>
 
-                        {(selectedNode.type === NodeType.AI_GENERATOR || selectedNode.type === NodeType.AI_OPTIMIZER || selectedNode.type === NodeType.AI_FACT_CHECK || selectedNode.type === NodeType.AI_CODER || selectedNode.type === NodeType.AI_BRAINSTORM) && (
-                            <div className="space-y-2">
-                                <label className="text-xs font-bold text-gray-500 uppercase">System Instruction / Prompt</label>
-                                <textarea 
-                                    value={selectedNode.systemInstruction || ''}
-                                    onChange={(e) => updateNodeData(selectedNode.id, { systemInstruction: e.target.value })}
-                                    className="w-full h-32 bg-gray-800 border border-gray-700 rounded p-2 text-sm focus:border-blue-500 outline-none resize-none"
-                                    placeholder="How should the AI behave?"
-                                />
-                                <p className="text-[10px] text-gray-500">Overrides global context specific to this node.</p>
-                            </div>
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-gray-500 uppercase">System Instruction / Prompt</label>
+                                    <textarea 
+                                        value={selectedNode.systemInstruction || ''}
+                                        onChange={(e) => updateNodeData(selectedNode.id, { systemInstruction: e.target.value })}
+                                        className="w-full h-32 bg-gray-800 border border-gray-700 rounded p-2 text-sm focus:border-blue-500 outline-none resize-none"
+                                        placeholder="How should the AI behave?"
+                                    />
+                                    <p className="text-[10px] text-gray-500">Overrides global context specific to this node.</p>
+                                </div>
+                            </>
                         )}
 
                         {selectedNode.type === NodeType.AI_CODER && (

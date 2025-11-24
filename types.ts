@@ -29,6 +29,7 @@ export interface NodeData {
   userPrompt?: string; // For input nodes
   systemInstruction?: string; // Hidden instruction for AI nodes
   model?: string;
+  cleanOutput?: boolean; // If true, AI strips conversational filler
   
   // specific fields
   customTemplate?: string; // For AI_CODER to use raw HTML

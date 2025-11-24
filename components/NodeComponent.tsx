@@ -1,7 +1,7 @@
 
 import React, { useRef, useEffect, memo } from 'react';
 import { NodeData, NodeType, NodeStatus } from '../types';
-import { Play, FileText, CheckCircle, AlertCircle, Code, Eye, Edit3, Type, Image as ImageIcon, Lightbulb, RefreshCw } from 'lucide-react';
+import { Play, FileText, CheckCircle, AlertCircle, Code, Eye, Edit3, Type, Image as ImageIcon, Lightbulb, RefreshCw, Wand } from 'lucide-react';
 
 interface NodeComponentProps {
   node: NodeData;
@@ -92,6 +92,11 @@ export const NodeComponent = memo(({
         <div className="flex items-center gap-2 font-semibold text-gray-200 text-sm">
           {getNodeIcon(node.type)}
           <span>{node.title}</span>
+          {node.cleanOutput && (
+            <div title="Strict Output Mode (No Filler)" className="ml-1 text-purple-400">
+                <Wand size={12} />
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
            {node.status === NodeStatus.RUNNING && <span className="animate-pulse text-yellow-400 text-xs">● Processing</span>}
