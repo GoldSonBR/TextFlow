@@ -419,7 +419,8 @@ export default function App() {
           nodes: nodes.map(n => ({ ...n, status: NodeStatus.IDLE, errorMessage: undefined }))
       });
 
-      let currentNodes = activeWorkspace.nodes.map(n => ({ ...n, status: NodeStatus.IDLE, errorMessage: undefined }));
+      // Fixed: Explicitly type currentNodes to avoid TS inferring errorMessage as 'undefined' literal
+      let currentNodes: NodeData[] = activeWorkspace.nodes.map(n => ({ ...n, status: NodeStatus.IDLE, errorMessage: undefined }));
       
       const updateLocalAndState = (id: string, updates: Partial<NodeData>) => {
           currentNodes = currentNodes.map(n => n.id === id ? { ...n, ...updates } : n);
