@@ -1,0 +1,5 @@
+{
+  "name": "TextFlow AI",
+  "description": "A node-based workflow editor for multi-layer AI text generation and processing, similar to ComfyUI but for text.",
+  "requestFramePermissions": []
+}
