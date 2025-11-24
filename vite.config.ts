@@ -11,8 +11,8 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     define: {
       // This ensures that process.env.API_KEY in the code is replaced with the actual value
-      // from VITE_API_KEY during the build process.
-      'process.env.API_KEY': JSON.stringify(env.VITE_API_KEY)
+      // from VITE_API_KEY (standard Vite) or API_KEY (standard Vercel) during the build process.
+      'process.env.API_KEY': JSON.stringify(env.VITE_API_KEY || env.API_KEY)
     }
   }
 })

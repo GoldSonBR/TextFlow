@@ -1,5 +1,13 @@
 import { GoogleGenAI } from "@google/genai";
 
+// Declare process for TypeScript to prevent "Cannot find name 'process'" error during build.
+// Vite will replace 'process.env.API_KEY' with the actual string value at build time.
+declare const process: {
+  env: {
+    API_KEY: string;
+  }
+};
+
 // We use the Gemini API to simulate different "agents" (GPT, Copilot, etc.)
 // by using different models and system instructions.
 
